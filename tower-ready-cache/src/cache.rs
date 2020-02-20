@@ -199,6 +199,7 @@ where
     /// the pending set; OR, when the new service becomes ready, it will replace
     /// the prior service in the ready set.
     pub fn push(&mut self, key: K, svc: S) {
+        trace!("push: inserting a new service");
         let cancel = oneshot::channel();
         self.push_pending(key, svc, cancel);
     }
@@ -206,6 +207,7 @@ where
     fn push_pending(&mut self, key: K, svc: S, (cancel_tx, cancel_rx): CancelPair) {
         if let Some(c) = self.pending_cancel_txs.insert(key.clone(), cancel_tx) {
             // If there is already a service for this key, cancel it.
+            trace!("push_pending: cancel");
             c.send(()).expect("cancel receiver lost");
         }
         self.pending.push(Pending {
@@ -214,6 +216,7 @@ where
             ready: Some(svc),
             _pd: std::marker::PhantomData,
         });
+        assert!(self.pending.len() >= self.pending_cancel_txs.len());
     }
 
     /// Polls services pending readiness, adding ready services to the ready set.
@@ -232,7 +235,7 @@ where
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(None) => return Poll::Ready(Ok(())),
                 Poll::Ready(Some(Ok((key, svc, cancel_rx)))) => {
-                    trace!("endpoint ready");
+                    trace!("poll_pending: endpoint ready");
                     let cancel_tx = self
                         .pending_cancel_txs
                         .swap_remove(&key)
@@ -242,11 +245,12 @@ where
                     self.ready.insert(key, (svc, (cancel_tx, cancel_rx)));
                 }
                 Poll::Ready(Some(Err(PendingError::Canceled(_)))) => {
-                    debug!("endpoint canceled");
+                    debug!("poll_pending: endpoint canceled");
                     // The cancellation for this service was removed in order to
                     // cause this cancellation.
                 }
                 Poll::Ready(Some(Err(PendingError::Inner(key, e)))) => {
+                    debug!("poll_pending: endpoint failed");
                     self.pending_cancel_txs
                         .swap_remove(&key)
                         .expect("missing cancelation");
@@ -299,6 +303,8 @@ where
                 // unready set, don't overwrite it.
                 if !self.pending_contains(&key) {
                     self.push_pending(key, svc, cancel);
+                } else {
+                    trace!("check_ready_index: service has been replaced in pending");
                 }
 
                 Ok(false)
@@ -343,6 +349,7 @@ where
         // If a new version of this service has been added to the
         // unready set, don't overwrite it.
         if !self.pending_contains(&key) {
+            trace!("call_ready_index: service has been replaced in pending");
             self.push_pending(key, svc, cancel);
         }
 
