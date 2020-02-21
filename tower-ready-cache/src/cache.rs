@@ -103,7 +103,7 @@ struct Pending<K, S, Req> {
 
 impl<K, S, Req> Default for ReadyCache<K, S, Req>
 where
-    K: Eq + Hash,
+    K: Eq + Hash + std::fmt::Debug,
     S: Service<Req>,
 {
     fn default() -> Self {
@@ -179,7 +179,7 @@ where
     /// must be called to cause the service to be dropped.
     pub fn evict<Q: Hash + Equivalent<K> + std::fmt::Debug>(&mut self, key: &Q) -> bool {
         let canceled = if let Some(c) = self.pending_cancel_txs.swap_remove(key) {
-            trace!(key = ?key, "evict: canceling service in pending");
+            trace!(key = ?key, gen = ?c.1, "evict: canceling service in pending");
             if !key.equivalent(&c.0) {
                 panic!("{:?} != {:?}", key, c.0);
             }
@@ -251,6 +251,7 @@ where
     /// `poll_pending` should typically be called again to continue driving
     /// pending services to readiness.
     pub fn poll_pending(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), error::Failed<K>>> {
+        trace!("poll_pending");
         loop {
             match Pin::new(&mut self.pending).poll_next(cx) {
                 Poll::Pending => return Poll::Pending,
@@ -393,6 +394,7 @@ impl<K, S, Req> Unpin for Pending<K, S, Req> {}
 impl<K, S, Req> Future for Pending<K, S, Req>
 where
     S: Service<Req>,
+    K: std::fmt::Debug,
 {
     type Output = Result<(K, S, usize, CancelRx), PendingError<K, S::Error>>;
 
@@ -402,7 +404,10 @@ where
             let gen = r.expect("cancel sender lost");
             assert_eq!(gen, self.gen, "cancel channel gen mismatch");
             let key = self.key.take().expect("polled after complete");
+            trace!(key = ?key, gen = gen, "Pending::poll: canceled");
             return Err(PendingError::Canceled(key, gen)).into();
+        } else {
+            trace!(key = ?self.key.as_ref().unwrap(), gen = self.gen, "Pending::poll: not canceled");
         }
 
         match self
@@ -412,20 +417,23 @@ where
             .poll_ready(cx)
         {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(())) => {
+            Poll::Ready(r) => {
                 let key = self.key.take().expect("polled after complete");
-                let cancel = self.cancel.take().expect("polled after complete");
-                Ok((
-                    key,
-                    self.ready.take().expect("polled after ready"),
-                    self.gen,
-                    cancel,
-                ))
-                .into()
-            }
-            Poll::Ready(Err(e)) => {
-                let key = self.key.take().expect("polled after compete");
-                Err(PendingError::Inner(key, self.gen, e)).into()
+                let mut cancel = self.cancel.take().expect("polled after complete");
+                let svc = self.ready.take().expect("polled after ready");
+                // double-check canceled
+                std::sync::atomic::fence(std::sync::atomic::Ordering::SeqCst);
+                if let Poll::Ready(r) = Pin::new(&mut cancel).poll(cx) {
+                    let gen = r.expect("cancel sender lost");
+                    assert_eq!(gen, self.gen, "cancel channel gen mismatch");
+                    error!(key = ?key, gen = gen, "Pending::poll: canceled while polling");
+                    unreachable!("got canceled _while_ polling");
+                }
+                if let Err(e) = r {
+                    Err(PendingError::Inner(key, self.gen, e)).into()
+                } else {
+                    Ok((key, svc, self.gen, cancel)).into()
+                }
             }
         }
     }

@@ -85,6 +85,7 @@ enum Error<E> {
 impl<D, Req> Balance<D, Req>
 where
     D: Discover,
+    D::Key: std::fmt::Debug,
     D::Service: Service<Req>,
     <D::Service as Service<Req>>::Error: Into<error::Error>,
 {
