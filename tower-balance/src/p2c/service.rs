@@ -114,7 +114,7 @@ where
 impl<D, Req> Balance<D, Req>
 where
     D: Discover + Unpin,
-    D::Key: Clone,
+    D::Key: Clone + std::fmt::Debug,
     D::Error: Into<error::Error>,
     D::Service: Service<Req> + Load,
     <D::Service as Load>::Metric: std::fmt::Debug,
@@ -218,7 +218,7 @@ where
 impl<D, Req> Service<Req> for Balance<D, Req>
 where
     D: Discover + Unpin,
-    D::Key: Clone,
+    D::Key: Clone + std::fmt::Debug,
     D::Error: Into<error::Error>,
     D::Service: Service<Req> + Load,
     <D::Service as Load>::Metric: std::fmt::Debug,
