@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["tower_test"] = [{"text":"impl&lt;T&gt; PinnedDrop for <a class=\"struct\" href=\"tower_test/mock/future/struct.ResponseFuture.html\" title=\"struct tower_test::mock::future::ResponseFuture\">ResponseFuture</a>&lt;T&gt;","synthetic":false,"types":["tower_test::mock::future::ResponseFuture"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
